@@ -1,0 +1,80 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+project_name = "{{cookiecutter.project_name}}"
+subdomains = ['www']
+
+Vagrant.configure(2) do |config|
+  config.vm.box = "box-cutter/centos72"
+  # set hostname for dev environment
+  config.vm.hostname = project_name +".dev"
+  # Create a private network, which allows host-only access to the machine
+  # using a specific IP.
+  config.vm.network "private_network", type: "dhcp"
+  config.vm.provider "parallels" do |prl|
+    prl.name = project_name
+    prl.customize ["set", :id, "--autostart", "auto"]
+  end
+  config.vm.provider "virtualbox" do |v|
+    v.name = project_name
+    #v.gui = true # Enable the GUI
+    # Saves time setting up by using linked clone versions of boxes, rather than full copies
+    v.linked_clone = true if Vagrant::VERSION =~ /^1.8/
+    v.customize ["modifyvm", :id, "--autostart-enabled", "on"]
+    #Sync time more often (times gets out of sync if host goes to sleep)
+    v.customize [ "guestproperty", "set", :id, "/VirtualBox/GuestAdd/VBoxService/--timesync-set-threshold", 10000 ]
+  end
+  config.hostmanager.enabled = false # Disable default to run as a provisioner later
+  config.hostmanager.manage_host = true
+  config.hostmanager.manage_guest = true
+  config.hostmanager.include_offline = false
+  # Make hostmanager work with DHCP addresses, from https://github.com/devopsgroup-io/vagrant-hostmanager/issues/86
+  cached_addresses = {}
+  config.hostmanager.ip_resolver = proc do |vm, resolving_vm|
+    if cached_addresses[vm.name].nil?
+      if hostname = (vm.ssh_info && vm.ssh_info[:host])
+        vm.communicate.execute("hostname -I | cut -d ' ' -f 2") do |type, contents|
+          # cached_addresses[vm.name] = contents.split("\n").first[/(\d+\.\d+\.\d+\.\d+)/, 1] # Original
+          cached_addresses[vm.name] = contents.split("\n").first
+        end
+      end
+    end
+    cached_addresses[vm.name]
+  end
+  config.hostmanager.ignore_private_ip = false
+
+  # Disable the default synced folder, it's not necessary, see next line
+  config.vm.synced_folder ".", "/vagrant", disabled: true
+  # sync our working directory to the main website folder /var/www
+  config.vm.synced_folder "./", "/srv/vhosts/"+ project_name
+  # Initial Server provision script (Only runs on first vagrant up) to install necessary software
+  #config.vm.provision "shell", env: { "project_name" => project_name}, path: "_provision/initialize.sh"
+
+  provision_script = ''
+
+  # Change NGINX User
+  provision_script << "sed -i 's/user .*/user vagrant;/' /etc/nginx/nginx.conf\n"
+
+  # Remove existing PHP FPM Pool configurations
+  provision_script << "rm /etc/php/7.1/fpm/pool.d/*.conf\n"
+
+  domain_aliases = []
+  for i in subdomains
+    provision_script << "ln -s /srv/vhosts/"+ project_name +"/config/nginx-vhosts/"+ i +"."+ project_name +".dev /etc/nginx/sites-available/"+ i +"."+ project_name +".dev\n"
+    provision_script << "ln -s /etc/nginx/sites-available/"+ i +"."+ project_name +".dev /etc/nginx/sites-enabled/"+ i +"."+ project_name +".dev\n"
+    # Link PHP FPM Pool configurations
+    provision_script << "ln -s /srv/vhosts/"+ project_name +"/config/nginx-conf/"+ i +".conf /etc/php/7.1/fpm/pool.d/"+ i +".conf\n"
+    domain_aliases << i +"."+ project_name +".dev"
+  end
+
+  # Configure PHP error log
+  provision_script << "printf \"error_log = /srv/vhosts/"+ project_name +"/logs/php.log\" >> /etc/php/7.1/fpm/php.ini\n"
+
+  config.hostmanager.aliases = domain_aliases
+
+  config.vm.provision "shell", inline: provision_script
+
+  # Provision script which runs every time the machine starts
+  config.vm.provision "shell", run: "always", path: "_provision/startup.sh"
+  config.vm.provision :hostmanager, run: "always"
+end

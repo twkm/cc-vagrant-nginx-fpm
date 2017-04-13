@@ -1,0 +1,73 @@
+server {
+    listen 80;
+
+    server_name {{cookiecutter.project_name}}.dev;
+    # Redirect to default server URL
+    return 301 $scheme://www.{{cookiecutter.project_name}}.dev$request_uri;
+}
+
+server {
+    listen 80 default_server;
+    #listen [::]:80 default_server ipv6only=on;
+    
+    root   /srv/vhosts/{{cookiecutter.project_name}}/data/www/cake/webroot;
+    index index.php index.html index.htm;
+
+    server_name  www.{{cookiecutter.project_name}}.dev;
+
+    sendfile off;
+
+    location / {
+        try_files $uri $uri /index.php?$args;
+    }
+
+    location ~ \.php$ {
+        try_files $uri =404;
+        fastcgi_split_path_info ^(.+\.php)(/.+)$;
+        include /etc/nginx/fastcgi_params;
+        fastcgi_pass unix:/var/run/php/php7.1-fpm.sock;
+        fastcgi_index   index.php;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+    }
+
+    #location / {
+    #    try_files $uri $uri/ =404;
+    #}
+    #
+    #location /adminer/ {
+    #    root /srv/vhosts/{{cookiecutter.project_name}}/data;
+    #}
+    #
+    #location ~* \.(gif|jpg|png)$ {
+    #    expires 30d;
+    #}
+    #
+    #location ~ \.php$ {
+    #    try_files $uri =404;
+    #    fastcgi_split_path_info ^(.+\.php)(/.+)$;
+    #    fastcgi_pass unix:/var/run/php/php7.1-fpm.sock;
+    #    fastcgi_index index.php;
+    #    fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+    #    include fastcgi_params;
+    #}
+
+    access_log  /srv/vhosts/{{cookiecutter.project_name}}/logs/{{cookiecutter.project_name}}.dev.access.log;
+    error_log  /srv/vhosts/{{cookiecutter.project_name}}/logs/{{cookiecutter.project_name}}.dev.error.log notice;
+
+    error_page 404 /404.html;
+    error_page 500 502 503 504 /50x.html;
+    location = /50x.html {
+        root /usr/share/nginx/html;
+    }
+
+    ## Only requests to our Host are allowed
+    #if ($host !~ ^($server_name)$ ) {
+    #   return 444;
+    #}
+
+    ## Only allow these request methods ##
+    ## Do not accept DELETE, SEARCH and other methods ##
+    #if ($request_method !~ ^(GET|HEAD|POST)$ ) {
+    #  return 444;
+    #}
+ }
